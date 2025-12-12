@@ -3,21 +3,34 @@ setlocal enabledelayedexpansion
 
 REM ============================================================
 REM HomeWatch - Simple WiFi Monitor
-REM One-click setup and run script for Windows
+REM One-click setup for REAL network capture on Windows
 REM ============================================================
 
-title HomeWatch Setup and Run
+title HomeWatch Setup
+
+REM Check for admin rights
+net session >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] Requesting administrator privileges...
+    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    exit /b
+)
 
 echo.
 echo ============================================================
-echo    HomeWatch - Simple WiFi Monitor Setup
+echo    HomeWatch - WiFi Monitor Setup
+echo    REAL Network Capture Edition
 echo ============================================================
 echo.
+
+REM Get the directory where this batch file is located
+set "SCRIPT_DIR=%~dp0"
+cd /d "%SCRIPT_DIR%"
 
 REM Check if Python is installed
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python is not installed or not in PATH!
+    echo [ERROR] Python is not installed!
     echo.
     echo Please install Python from: https://www.python.org/downloads/
     echo Make sure to check "Add Python to PATH" during installation.
@@ -28,15 +41,54 @@ if errorlevel 1 (
 
 echo [OK] Python found
 python --version
-
-REM Get the directory where this batch file is located
-set "SCRIPT_DIR=%~dp0"
-cd /d "%SCRIPT_DIR%"
-
-echo [INFO] Working directory: %SCRIPT_DIR%
 echo.
 
-REM Check if virtual environment exists, if not create it
+REM Check if Npcap is installed (required for real capture)
+echo [CHECK] Looking for Npcap...
+if exist "C:\Program Files\Npcap\NPFInstall.exe" (
+    echo [OK] Npcap is installed
+) else if exist "C:\Windows\System32\Npcap\NPFInstall.exe" (
+    echo [OK] Npcap is installed
+) else (
+    echo [WARNING] Npcap is NOT installed!
+    echo.
+    echo Npcap is REQUIRED for real network capture.
+    echo.
+
+    choice /C YN /M "Do you want to download and install Npcap now"
+    if errorlevel 2 (
+        echo.
+        echo [INFO] Skipping Npcap installation.
+        echo        The app will NOT be able to capture real network traffic.
+        echo.
+    ) else (
+        echo.
+        echo [INFO] Downloading Npcap installer...
+
+        REM Download Npcap
+        powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://npcap.com/dist/npcap-1.79.exe' -OutFile '%TEMP%\npcap-installer.exe'}"
+
+        if exist "%TEMP%\npcap-installer.exe" (
+            echo [OK] Download complete
+            echo.
+            echo [INFO] Running Npcap installer...
+            echo        IMPORTANT: Check "WinPcap API-compatible Mode" during install!
+            echo.
+            start /wait "" "%TEMP%\npcap-installer.exe"
+            del "%TEMP%\npcap-installer.exe" 2>nul
+            echo [OK] Npcap installation completed
+        ) else (
+            echo [ERROR] Download failed. Please install manually from:
+            echo         https://npcap.com/#download
+            echo.
+            pause
+        )
+    )
+)
+
+echo.
+
+REM Check/create virtual environment
 if not exist "venv" (
     echo [SETUP] Creating virtual environment...
     python -m venv venv
@@ -47,90 +99,43 @@ if not exist "venv" (
     )
     echo [OK] Virtual environment created
 ) else (
-    echo [OK] Virtual environment already exists
+    echo [OK] Virtual environment exists
 )
 
 REM Activate virtual environment
-echo [INFO] Activating virtual environment...
 call venv\Scripts\activate.bat
-if errorlevel 1 (
-    echo [ERROR] Failed to activate virtual environment
-    pause
-    exit /b 1
-)
-echo [OK] Virtual environment activated
 
 REM Upgrade pip
-echo.
 echo [SETUP] Upgrading pip...
-python -m pip install --upgrade pip --quiet
+python -m pip install --upgrade pip --quiet 2>nul
 
 REM Install dependencies
-echo.
 echo [SETUP] Installing dependencies...
-echo         This may take a minute...
-echo.
 
-REM Install packages one by one for better error handling
-pip install flask --quiet
-if errorlevel 1 (
-    echo [ERROR] Failed to install flask
-    pause
-    exit /b 1
-)
-echo [OK] Flask installed
+pip install flask flask-cors apscheduler --quiet 2>nul
+echo [OK] Flask packages installed
 
-pip install flask-cors --quiet
-if errorlevel 1 (
-    echo [ERROR] Failed to install flask-cors
-    pause
-    exit /b 1
-)
-echo [OK] Flask-CORS installed
+echo [SETUP] Installing Scapy for network capture...
+pip install scapy --quiet 2>nul
+echo [OK] Scapy installed
 
-pip install apscheduler --quiet
-if errorlevel 1 (
-    echo [ERROR] Failed to install apscheduler
-    pause
-    exit /b 1
-)
-echo [OK] APScheduler installed
-
-REM Try to install scapy (may require Npcap on Windows)
-echo.
-echo [SETUP] Installing Scapy (for network capture)...
-pip install scapy --quiet
-if errorlevel 1 (
-    echo [WARNING] Scapy installation had issues - will run in demo mode
-) else (
-    echo [OK] Scapy installed
-)
-
-REM Create data directory if needed
+REM Create data directory
 if not exist "data" mkdir data
 
 echo.
 echo ============================================================
-echo    Setup Complete! Starting HomeWatch...
+echo    Setup Complete!
 echo ============================================================
 echo.
-echo    IMPORTANT NOTES:
-echo    ----------------
-echo    1. Open your browser to: http://localhost:5000
-echo    2. The app will run in DEMO MODE (generates sample data)
-echo    3. For real network capture on Windows, you need:
-echo       - Npcap installed: https://npcap.com/#download
-echo       - Run this script as Administrator
+echo    Starting HomeWatch with REAL network capture...
 echo.
-echo    Press Ctrl+C to stop the server
+echo    Open your browser to: http://localhost:5000
 echo.
+echo    Press Ctrl+C to stop
 echo ============================================================
 echo.
 
-REM Start the application
+REM Run the app
 python app.py
 
-REM If we get here, the app stopped
-echo.
-echo [INFO] HomeWatch stopped
 pause

@@ -38,11 +38,17 @@ def index():
 def get_status():
     """Get current monitoring status."""
     global capture
-    return jsonify({
+    status = {
         'monitoring': capture is not None and capture.is_running,
         'total_urls': db.get_total_count(),
         'today_count': db.get_today_count()
-    })
+    }
+    if capture:
+        cap_status = capture.get_status()
+        status['packets_captured'] = cap_status.get('packets', 0)
+        if cap_status.get('error'):
+            status['error'] = cap_status['error']
+    return jsonify(status)
 
 
 @app.route('/api/start', methods=['POST'])
@@ -53,9 +59,9 @@ def start_monitoring():
         capture = NetworkCapture(db)
 
     if not capture.is_running:
-        interface = request.json.get('interface', 'auto')
-        capture.start(interface)
-        return jsonify({'success': True, 'message': 'Monitoring started'})
+        interface = request.json.get('interface', 'auto') if request.json else 'auto'
+        success, message = capture.start(interface)
+        return jsonify({'success': success, 'message': message})
     return jsonify({'success': False, 'message': 'Already monitoring'})
 
 

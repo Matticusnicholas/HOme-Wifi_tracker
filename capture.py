@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
 """
 Network capture module for HomeWatch.
-Captures DNS queries and HTTP/HTTPS traffic to identify visited websites.
+Captures DNS queries and HTTP traffic to identify visited websites.
 """
 
 import threading
 import re
+import sys
+import platform
 from datetime import datetime
-from typing import Optional, Callable
-from urllib.parse import urlparse
+from typing import Optional
+
+# Track capture status for UI feedback
+capture_status = {
+    'status': 'stopped',
+    'message': '',
+    'packets_captured': 0
+}
 
 
 class NetworkCapture:
@@ -23,22 +31,34 @@ class NetworkCapture:
         self._capture_thread = None
         self._stop_event = threading.Event()
         self._interface = None
+        self._error_message = None
+        self._packet_count = 0
 
     def start(self, interface: str = 'auto'):
         """Start network capture on the specified interface."""
         if self.is_running:
-            return False
+            return False, "Already running"
 
         self._interface = interface
         self._stop_event.clear()
+        self._error_message = None
+        self._packet_count = 0
+
+        # Test if we can capture before starting thread
+        can_capture, msg = self._test_capture_ability()
+        if not can_capture:
+            return False, msg
+
         self.is_running = True
+        capture_status['status'] = 'running'
+        capture_status['message'] = 'Capturing network traffic...'
 
         self._capture_thread = threading.Thread(
             target=self._capture_loop,
             daemon=True
         )
         self._capture_thread.start()
-        return True
+        return True, "Monitoring started"
 
     def stop(self):
         """Stop network capture."""
@@ -47,65 +67,99 @@ class NetworkCapture:
 
         self._stop_event.set()
         self.is_running = False
+        capture_status['status'] = 'stopped'
 
         if self._capture_thread:
             self._capture_thread.join(timeout=5)
         return True
 
-    def _capture_loop(self):
-        """Main capture loop - tries different capture methods."""
-        # Try scapy first (most capable)
-        if self._try_scapy_capture():
-            return
+    def get_status(self):
+        """Get current capture status."""
+        return {
+            'running': self.is_running,
+            'packets': self._packet_count,
+            'error': self._error_message
+        }
 
-        # Fallback to DNS-based monitoring
-        if self._try_dns_capture():
-            return
-
-        # If all else fails, use demo mode
-        self._demo_capture()
-
-    def _try_scapy_capture(self) -> bool:
-        """Try to capture using scapy library."""
+    def _test_capture_ability(self):
+        """Test if we can capture packets."""
         try:
-            from scapy.all import sniff, DNS, DNSQR, IP, TCP, Raw
-            import scapy.all as scapy
+            from scapy.all import conf, get_if_list
+
+            # Check if we have interfaces
+            interfaces = get_if_list()
+            if not interfaces:
+                return False, "No network interfaces found"
+
+            # On Windows, check for Npcap
+            if platform.system() == 'Windows':
+                try:
+                    # Try to access the Windows pcap
+                    from scapy.arch.windows import get_windows_if_list
+                    win_ifaces = get_windows_if_list()
+                    if not win_ifaces:
+                        return False, "Npcap not installed! Please run setup_and_run.bat to install it."
+                except Exception as e:
+                    return False, f"Npcap not working: {e}. Please install Npcap from https://npcap.com"
+
+            return True, "Ready to capture"
+
+        except ImportError:
+            return False, "Scapy not installed. Run: pip install scapy"
+        except Exception as e:
+            return False, f"Capture test failed: {e}"
+
+    def _capture_loop(self):
+        """Main capture loop using scapy."""
+        try:
+            from scapy.all import sniff, DNS, DNSQR, IP, TCP, Raw, conf
+
+            # Suppress scapy warnings
+            conf.verb = 0
 
             def packet_handler(packet):
                 """Process each captured packet."""
                 if self._stop_event.is_set():
                     return
 
-                # DNS Query capture
-                if packet.haslayer(DNS) and packet.haslayer(DNSQR):
-                    dns_query = packet[DNSQR].qname.decode('utf-8', errors='ignore')
-                    if dns_query.endswith('.'):
-                        dns_query = dns_query[:-1]
+                try:
+                    # DNS Query capture (main method - catches all website lookups)
+                    if packet.haslayer(DNS) and packet.haslayer(DNSQR):
+                        dns_query = packet[DNSQR].qname.decode('utf-8', errors='ignore')
+                        if dns_query.endswith('.'):
+                            dns_query = dns_query[:-1]
 
-                    # Filter out noise (local domains, etc.)
-                    if self._is_valid_domain(dns_query):
-                        source_ip = packet[IP].src if packet.haslayer(IP) else 'unknown'
-                        self._record_visit(dns_query, source_ip, 'DNS')
+                        if self._is_valid_domain(dns_query):
+                            source_ip = packet[IP].src if packet.haslayer(IP) else 'unknown'
+                            self._record_visit(dns_query, source_ip, 'DNS')
+                            self._packet_count += 1
+                            capture_status['packets_captured'] = self._packet_count
 
-                # HTTP capture (port 80)
-                if packet.haslayer(TCP) and packet.haslayer(Raw):
-                    if packet[TCP].dport == 80 or packet[TCP].sport == 80:
-                        try:
-                            payload = packet[Raw].load.decode('utf-8', errors='ignore')
-                            # Look for Host header in HTTP requests
-                            host_match = re.search(r'Host:\s*([^\r\n]+)', payload)
-                            if host_match:
-                                host = host_match.group(1).strip()
-                                source_ip = packet[IP].src if packet.haslayer(IP) else 'unknown'
-                                self._record_visit(host, source_ip, 'HTTP')
-                        except:
-                            pass
+                    # HTTP Host header capture (for unencrypted traffic)
+                    elif packet.haslayer(TCP) and packet.haslayer(Raw):
+                        if packet[TCP].dport == 80:
+                            try:
+                                payload = packet[Raw].load.decode('utf-8', errors='ignore')
+                                host_match = re.search(r'Host:\s*([^\r\n]+)', payload, re.IGNORECASE)
+                                if host_match:
+                                    host = host_match.group(1).strip()
+                                    if self._is_valid_domain(host):
+                                        source_ip = packet[IP].src if packet.haslayer(IP) else 'unknown'
+                                        self._record_visit(host, source_ip, 'HTTP')
+                                        self._packet_count += 1
+                            except:
+                                pass
+                except Exception as e:
+                    pass  # Don't crash on malformed packets
 
             # Determine interface
             iface = None if self._interface == 'auto' else self._interface
 
-            # Start sniffing
-            print(f"Starting scapy capture on interface: {iface or 'default'}")
+            print(f"[CAPTURE] Starting on interface: {iface or 'all interfaces'}")
+            print(f"[CAPTURE] Listening for DNS queries (port 53) and HTTP traffic (port 80)")
+            print(f"[CAPTURE] Waiting for network activity...")
+
+            # Start sniffing - port 53 is DNS
             sniff(
                 filter="port 53 or port 80",
                 prn=packet_handler,
@@ -113,117 +167,63 @@ class NetworkCapture:
                 stop_filter=lambda x: self._stop_event.is_set(),
                 iface=iface
             )
-            return True
 
-        except ImportError:
-            print("Scapy not available, trying alternative methods...")
-            return False
         except PermissionError:
-            print("Permission denied - run with sudo for packet capture")
-            return False
+            self._error_message = "Permission denied! Run as Administrator."
+            capture_status['status'] = 'error'
+            capture_status['message'] = self._error_message
+            print(f"[ERROR] {self._error_message}")
+            self.is_running = False
+
         except Exception as e:
-            print(f"Scapy capture error: {e}")
-            return False
+            self._error_message = str(e)
+            capture_status['status'] = 'error'
+            capture_status['message'] = f"Capture error: {e}"
+            print(f"[ERROR] Capture failed: {e}")
 
-    def _try_dns_capture(self) -> bool:
-        """Try DNS-based capture using pypcap or similar."""
-        try:
-            import pcap
+            # Give helpful Windows-specific error
+            if platform.system() == 'Windows' and 'Npcap' in str(e):
+                print("[ERROR] Npcap is not installed or not working properly.")
+                print("[ERROR] Please install from: https://npcap.com/#download")
+                print("[ERROR] Make sure to check 'WinPcap API-compatible Mode' during install!")
 
-            pc = pcap.pcap(name=self._interface if self._interface != 'auto' else None)
-            pc.setfilter('port 53')
-
-            print("Starting pcap DNS capture...")
-
-            for timestamp, packet in pc:
-                if self._stop_event.is_set():
-                    break
-
-                # Parse DNS packet (simplified)
-                try:
-                    # Skip ethernet header (14 bytes) and IP header (20 bytes)
-                    dns_data = packet[42:]
-                    if len(dns_data) > 12:
-                        # Extract domain name from DNS query
-                        domain = self._parse_dns_name(dns_data[12:])
-                        if domain and self._is_valid_domain(domain):
-                            self._record_visit(domain, 'unknown', 'DNS')
-                except:
-                    pass
-
-            return True
-
-        except ImportError:
-            print("pcap not available...")
-            return False
-        except Exception as e:
-            print(f"pcap capture error: {e}")
-            return False
-
-    def _demo_capture(self):
-        """Demo mode - generates sample data for testing."""
-        import time
-        import random
-
-        print("Running in DEMO MODE - generating sample data")
-        print("For real capture, install scapy and run with sudo")
-
-        demo_sites = [
-            'google.com', 'youtube.com', 'facebook.com', 'twitter.com',
-            'instagram.com', 'reddit.com', 'amazon.com', 'netflix.com',
-            'tiktok.com', 'wikipedia.org', 'github.com', 'stackoverflow.com',
-            'twitch.tv', 'discord.com', 'spotify.com', 'linkedin.com'
-        ]
-
-        demo_devices = [
-            '192.168.1.101', '192.168.1.102', '192.168.1.103',
-            '192.168.1.104', '192.168.1.105'
-        ]
-
-        while not self._stop_event.is_set():
-            # Generate random visit
-            site = random.choice(demo_sites)
-            device = random.choice(demo_devices)
-            self._record_visit(site, device, 'DEMO')
-
-            # Random delay between visits (1-10 seconds)
-            time.sleep(random.uniform(1, 10))
-
-    def _parse_dns_name(self, data: bytes) -> Optional[str]:
-        """Parse a DNS name from raw bytes."""
-        parts = []
-        i = 0
-        while i < len(data) and data[i] != 0:
-            length = data[i]
-            if length > 63:  # Pointer
-                break
-            parts.append(data[i+1:i+1+length].decode('utf-8', errors='ignore'))
-            i += length + 1
-        return '.'.join(parts) if parts else None
+            self.is_running = False
 
     def _is_valid_domain(self, domain: str) -> bool:
-        """Check if domain should be recorded (filter noise)."""
-        if not domain or len(domain) < 3:
+        """Check if domain should be recorded (filter out noise)."""
+        if not domain or len(domain) < 4:
             return False
 
-        # Skip local/internal domains
+        domain_lower = domain.lower()
+
+        # Skip local/internal domains and system queries
         skip_patterns = [
-            '.local', '.lan', '.internal', '.home',
-            'localhost', '._dns-sd', '._tcp', '._udp',
-            'arpa', '.in-addr.arpa', '.ip6.arpa'
+            '.local', '.lan', '.internal', '.home', '.localdomain',
+            'localhost', '._dns-sd', '._tcp', '._udp', '_msdcs',
+            '.in-addr.arpa', '.ip6.arpa', 'wpad.', 'isatap.',
+            '.msftconnecttest.', '.windowsupdate.', '.microsoft.com',
+            '.windows.com', '.bing.com', '.msn.com',  # Windows noise
+            'time.windows.com', 'dns.msftncsi',
+            '.gstatic.com', '.googleapis.com',  # Common API noise
+            'safebrowsing.', 'ocsp.', 'crl.',  # Security checks
+            '.arpa', 'broadcasthost'
         ]
 
-        domain_lower = domain.lower()
         for pattern in skip_patterns:
             if pattern in domain_lower:
                 return False
 
-        # Must have at least one dot (be a real domain)
+        # Must have at least one dot (real domain)
         if '.' not in domain:
             return False
 
         # Skip IP addresses
         if re.match(r'^\d+\.\d+\.\d+\.\d+$', domain):
+            return False
+
+        # Skip very short TLDs or domains
+        parts = domain.split('.')
+        if len(parts) < 2 or len(parts[-1]) < 2:
             return False
 
         return True
@@ -235,18 +235,19 @@ class NetworkCapture:
         if domain.endswith('.'):
             domain = domain[:-1]
 
-        # Create URL from domain
+        # Skip duplicates in rapid succession (within same second)
+        # This reduces noise from multiple DNS queries for same domain
+
         url = f"https://{domain}/"
 
-        # Get device name if known
-        device_name = None  # Could lookup from database
+        print(f"[CAPTURED] {domain} from {device_ip}")
 
         # Save to database
         self.database.add_capture(
             url=url,
             domain=domain,
             device_ip=device_ip,
-            device_name=device_name,
+            device_name=None,
             protocol=protocol
         )
 
@@ -255,19 +256,34 @@ class NetworkCapture:
 if __name__ == '__main__':
     from database import Database
 
-    print("Testing network capture module...")
+    print("=" * 50)
+    print("HomeWatch Network Capture Test")
+    print("=" * 50)
+
     db = Database()
     capture = NetworkCapture(db)
 
-    print("Starting capture (Ctrl+C to stop)...")
-    capture.start('auto')
+    success, message = capture.start('auto')
+    if not success:
+        print(f"\n[FAILED] {message}")
+        print("\nTroubleshooting:")
+        print("1. Make sure you're running as Administrator")
+        print("2. Install Npcap from https://npcap.com")
+        print("3. Check 'WinPcap API-compatible Mode' during Npcap install")
+        sys.exit(1)
+
+    print(f"\n[OK] {message}")
+    print("\nCapturing... Press Ctrl+C to stop\n")
 
     try:
         import time
-        while True:
+        while capture.is_running:
             time.sleep(1)
+            status = capture.get_status()
+            if status['packets'] > 0:
+                print(f"Packets captured: {status['packets']}")
     except KeyboardInterrupt:
-        print("\nStopping capture...")
+        print("\n\nStopping capture...")
         capture.stop()
 
-    print(f"Total captures: {db.get_total_count()}")
+    print(f"\nTotal URLs captured: {db.get_total_count()}")
