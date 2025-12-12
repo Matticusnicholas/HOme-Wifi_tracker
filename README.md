@@ -13,23 +13,28 @@ A user-friendly web application for monitoring websites visited on your home net
 
 ## Quick Start
 
-### 1. Install Dependencies
+### Windows (Easiest - One Click!)
+
+1. **Double-click `setup_and_run.bat`**
+2. Wait for setup to complete
+3. Open browser to **http://localhost:5000**
+
+That's it! The batch file handles everything automatically.
+
+### Linux / macOS
 
 ```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-### 2. Run the Application
-
-```bash
-# For demo mode (generates sample data, no root required):
+# Run (demo mode)
 python app.py
 
-# For real network capture (requires root/admin):
+# Run with real capture (requires root)
 sudo python app.py
 ```
 
-### 3. Open Your Browser
+### Then Open Your Browser
 
 Navigate to: **http://localhost:5000**
 
@@ -106,10 +111,13 @@ sudo python3 app.py
 
 ### Windows
 
-Network capture on Windows requires additional setup:
-1. Install [Npcap](https://nmap.org/npcap/) with WinPcap compatibility mode
-2. Run Command Prompt as Administrator
-3. Run: `python app.py`
+**Easy Setup (Demo Mode):**
+1. Just double-click `setup_and_run.bat` - it handles everything!
+
+**For Real Network Capture:**
+1. Install [Npcap](https://npcap.com/#download) (check "WinPcap API-compatible mode")
+2. Right-click `setup_and_run.bat` → "Run as Administrator"
+3. Real network data will be captured instead of demo data
 
 ## Network Setup Options
 
@@ -176,6 +184,8 @@ Run with sudo/administrator privileges for network capture.
 
 ```
 homewatch/
+├── setup_and_run.bat   # Windows: One-click setup & run
+├── run.bat             # Windows: Quick run (after setup)
 ├── app.py              # Main Flask application
 ├── database.py         # Database operations
 ├── capture.py          # Network capture module

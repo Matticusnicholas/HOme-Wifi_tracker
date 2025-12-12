@@ -156,14 +156,24 @@ def clear_data():
 @app.route('/api/interfaces')
 def get_interfaces():
     """Get available network interfaces."""
+    interfaces = ['auto']
     try:
-        import netifaces
-        interfaces = netifaces.interfaces()
-        # Filter out loopback and virtual interfaces for simplicity
-        filtered = [i for i in interfaces if not i.startswith(('lo', 'veth', 'docker', 'br-'))]
-        return jsonify({'interfaces': filtered})
-    except ImportError:
-        return jsonify({'interfaces': ['auto']})
+        # Try using scapy (which we already have)
+        from scapy.all import get_if_list
+        ifaces = get_if_list()
+        # Filter out loopback and virtual interfaces
+        filtered = [i for i in ifaces if not i.startswith(('lo', 'veth', 'docker', 'br-')) and i != 'lo']
+        if filtered:
+            interfaces = ['auto'] + filtered
+    except:
+        # Fallback: try socket method (works on most systems)
+        try:
+            import socket
+            hostname = socket.gethostname()
+            interfaces = ['auto', hostname]
+        except:
+            pass
+    return jsonify({'interfaces': interfaces})
 
 
 if __name__ == '__main__':
