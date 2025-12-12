@@ -177,18 +177,78 @@ class NetworkWideCapture:
 
     def _get_gateway_ip(self) -> Optional[str]:
         """Get default gateway IP."""
+        # Method 1: Try scapy's routing table (most reliable)
         try:
-            if IS_WINDOWS:
-                output = subprocess.check_output("ipconfig", shell=True).decode()
-                # Find default gateway
-                match = re.search(r'Default Gateway.*?:\s*(\d+\.\d+\.\d+\.\d+)', output)
-                return match.group(1) if match else None
-            else:
+            from scapy.all import conf
+            # Get the gateway from scapy's routing table
+            for route in conf.route.routes:
+                # Look for default route (destination 0.0.0.0)
+                if route[0] == 0:  # default route
+                    gateway = route[2]
+                    if gateway and gateway != '0.0.0.0':
+                        print(f"[DEBUG] Gateway from scapy: {gateway}")
+                        return gateway
+        except Exception as e:
+            print(f"[DEBUG] Scapy route method failed: {e}")
+
+        # Method 2: Try PowerShell (Windows)
+        if IS_WINDOWS:
+            try:
+                output = subprocess.check_output(
+                    ['powershell', '-Command',
+                     '(Get-NetRoute -DestinationPrefix "0.0.0.0/0" | Select-Object -First 1).NextHop'],
+                    shell=False
+                ).decode().strip()
+                if output and re.match(r'\d+\.\d+\.\d+\.\d+', output):
+                    print(f"[DEBUG] Gateway from PowerShell: {output}")
+                    return output
+            except Exception as e:
+                print(f"[DEBUG] PowerShell method failed: {e}")
+
+            # Method 3: Try ipconfig (Windows)
+            try:
+                output = subprocess.check_output("ipconfig", shell=True).decode('utf-8', errors='ignore')
+                # Try multiple patterns for different Windows languages/versions
+                patterns = [
+                    r'Default Gateway[.\s]*:\s*(\d+\.\d+\.\d+\.\d+)',
+                    r'Gateway[.\s]*:\s*(\d+\.\d+\.\d+\.\d+)',
+                    r'Puerta de enlace[.\s]*:\s*(\d+\.\d+\.\d+\.\d+)',  # Spanish
+                    r'Standardgateway[.\s]*:\s*(\d+\.\d+\.\d+\.\d+)',  # German
+                ]
+                for pattern in patterns:
+                    match = re.search(pattern, output, re.IGNORECASE)
+                    if match:
+                        print(f"[DEBUG] Gateway from ipconfig: {match.group(1)}")
+                        return match.group(1)
+            except Exception as e:
+                print(f"[DEBUG] ipconfig method failed: {e}")
+        else:
+            # Linux/Mac
+            try:
                 output = subprocess.check_output("ip route show default", shell=True).decode()
                 match = re.search(r'default via (\d+\.\d+\.\d+\.\d+)', output)
-                return match.group(1) if match else None
-        except:
-            return None
+                if match:
+                    return match.group(1)
+            except:
+                pass
+
+            try:
+                output = subprocess.check_output("netstat -rn", shell=True).decode()
+                match = re.search(r'default\s+(\d+\.\d+\.\d+\.\d+)', output)
+                if match:
+                    return match.group(1)
+            except:
+                pass
+
+        # Method 4: Infer from our IP (assume .1 is gateway)
+        if self._my_ip:
+            parts = self._my_ip.split('.')
+            if len(parts) == 4:
+                inferred = f"{parts[0]}.{parts[1]}.{parts[2]}.1"
+                print(f"[DEBUG] Inferred gateway: {inferred}")
+                return inferred
+
+        return None
 
     def _get_mac(self, ip: str) -> Optional[str]:
         """Get MAC address for an IP via ARP."""
