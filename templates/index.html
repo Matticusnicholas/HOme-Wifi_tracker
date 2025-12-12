@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HomeWatch - WiFi Monitor</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">&#127968;</span>
+                <h1>HomeWatch</h1>
+            </div>
+            <div class="status-indicator" id="statusIndicator">
+                <span class="status-dot"></span>
+                <span class="status-text">Stopped</span>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="tabs">
+            <button class="tab active" data-tab="dashboard">Dashboard</button>
+            <button class="tab" data-tab="activity">Activity Log</button>
+            <button class="tab" data-tab="devices">Devices</button>
+            <button class="tab" data-tab="reports">Reports</button>
+            <button class="tab" data-tab="settings">Settings</button>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="content">
+            <!-- Dashboard Tab -->
+            <section id="dashboard" class="tab-content active">
+                <div class="control-panel">
+                    <button id="startBtn" class="btn btn-primary btn-large">
+                        <span class="btn-icon">&#9654;</span> Start Monitoring
+                    </button>
+                    <button id="stopBtn" class="btn btn-danger btn-large" style="display: none;">
+                        <span class="btn-icon">&#9632;</span> Stop Monitoring
+                    </button>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="todayCount">0</div>
+                        <div class="stat-label">Sites Today</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="uniqueSites">0</div>
+                        <div class="stat-label">Unique Sites</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="activeDevices">0</div>
+                        <div class="stat-label">Active Devices</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalUrls">0</div>
+                        <div class="stat-label">Total Captured</div>
+                    </div>
+                </div>
+
+                <div class="dashboard-panels">
+                    <div class="panel">
+                        <h3>Top Visited Sites (Last 7 Days)</h3>
+                        <div id="topSites" class="top-sites-list">
+                            <p class="empty-message">No data yet. Start monitoring to see results.</p>
+                        </div>
+                    </div>
+                    <div class="panel">
+                        <h3>Today's Activity</h3>
+                        <div id="activityChart" class="activity-chart">
+                            <p class="empty-message">No activity recorded today.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h3>Recent Activity</h3>
+                    <div id="recentActivity" class="recent-list">
+                        <p class="empty-message">No recent activity.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Activity Log Tab -->
+            <section id="activity" class="tab-content">
+                <div class="filters">
+                    <input type="text" id="searchInput" placeholder="Search URLs..." class="search-input">
+                    <input type="date" id="dateFilter" class="date-input">
+                    <select id="deviceFilter" class="select-input">
+                        <option value="">All Devices</option>
+                    </select>
+                    <button id="searchBtn" class="btn btn-primary">Search</button>
+                    <button id="clearFilters" class="btn btn-secondary">Clear</button>
+                </div>
+
+                <div class="activity-table-container">
+                    <table class="activity-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Website</th>
+                                <th>Device</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activityTableBody">
+                            <tr><td colspan="3" class="empty-message">No activity recorded yet.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="pagination" id="pagination">
+                    <button id="prevPage" class="btn btn-secondary" disabled>Previous</button>
+                    <span id="pageInfo">Page 1</span>
+                    <button id="nextPage" class="btn btn-secondary">Next</button>
+                </div>
+            </section>
+
+            <!-- Devices Tab -->
+            <section id="devices" class="tab-content">
+                <h2>Network Devices</h2>
+                <p class="section-desc">Devices that have been seen on your network. Click on a device name to rename it.</p>
+
+                <div id="devicesList" class="devices-grid">
+                    <p class="empty-message">No devices detected yet. Start monitoring to discover devices.</p>
+                </div>
+            </section>
+
+            <!-- Reports Tab -->
+            <section id="reports" class="tab-content">
+                <h2>Generate Report</h2>
+
+                <div class="report-controls">
+                    <div class="date-range">
+                        <label>
+                            Start Date:
+                            <input type="date" id="reportStartDate" class="date-input">
+                        </label>
+                        <label>
+                            End Date:
+                            <input type="date" id="reportEndDate" class="date-input">
+                        </label>
+                        <button id="generateReport" class="btn btn-primary">Generate Report</button>
+                    </div>
+                </div>
+
+                <div id="reportContent" class="report-container" style="display: none;">
+                    <div class="report-header">
+                        <h3>Activity Report</h3>
+                        <span id="reportPeriod"></span>
+                    </div>
+
+                    <div class="report-summary">
+                        <div class="report-stat">
+                            <span class="value" id="reportTotalVisits">0</span>
+                            <span class="label">Total Visits</span>
+                        </div>
+                        <div class="report-stat">
+                            <span class="value" id="reportUniqueSites">0</span>
+                            <span class="label">Unique Sites</span>
+                        </div>
+                        <div class="report-stat">
+                            <span class="value" id="reportDevices">0</span>
+                            <span class="label">Devices</span>
+                        </div>
+                    </div>
+
+                    <div class="report-section">
+                        <h4>Most Visited Sites</h4>
+                        <div id="reportTopSites"></div>
+                    </div>
+
+                    <div class="report-section">
+                        <h4>Activity by Device</h4>
+                        <div id="reportByDevice"></div>
+                    </div>
+
+                    <button id="printReport" class="btn btn-secondary">Print Report</button>
+                </div>
+            </section>
+
+            <!-- Settings Tab -->
+            <section id="settings" class="tab-content">
+                <h2>Settings</h2>
+
+                <div class="settings-section">
+                    <h3>Scheduled Monitoring</h3>
+                    <div class="setting-group">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="scheduleEnabled">
+                            <span>Enable scheduled monitoring</span>
+                        </label>
+                    </div>
+                    <div class="setting-group">
+                        <label>
+                            Monitor from:
+                            <input type="time" id="monitorStartTime" value="00:00">
+                        </label>
+                        <label>
+                            to:
+                            <input type="time" id="monitorEndTime" value="23:59">
+                        </label>
+                    </div>
+                    <div class="setting-group">
+                        <label>Days of week:</label>
+                        <div class="day-checkboxes">
+                            <label><input type="checkbox" name="day" value="Mon" checked> Mon</label>
+                            <label><input type="checkbox" name="day" value="Tue" checked> Tue</label>
+                            <label><input type="checkbox" name="day" value="Wed" checked> Wed</label>
+                            <label><input type="checkbox" name="day" value="Thu" checked> Thu</label>
+                            <label><input type="checkbox" name="day" value="Fri" checked> Fri</label>
+                            <label><input type="checkbox" name="day" value="Sat" checked> Sat</label>
+                            <label><input type="checkbox" name="day" value="Sun" checked> Sun</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Daily Report Email</h3>
+                    <div class="setting-group">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="reportEnabled">
+                            <span>Send daily email report</span>
+                        </label>
+                    </div>
+                    <div class="setting-group">
+                        <label>
+                            Send report at:
+                            <input type="time" id="reportTime" value="08:00">
+                        </label>
+                    </div>
+                    <div class="setting-group">
+                        <label>
+                            Email address:
+                            <input type="email" id="reportEmail" placeholder="your@email.com" class="text-input">
+                        </label>
+                    </div>
+
+                    <details class="smtp-settings">
+                        <summary>SMTP Settings (for email delivery)</summary>
+                        <div class="setting-group">
+                            <label>
+                                SMTP Server:
+                                <input type="text" id="smtpServer" placeholder="smtp.gmail.com" class="text-input">
+                            </label>
+                        </div>
+                        <div class="setting-group">
+                            <label>
+                                SMTP Port:
+                                <input type="number" id="smtpPort" value="587" class="text-input short">
+                            </label>
+                        </div>
+                        <div class="setting-group">
+                            <label>
+                                SMTP Username:
+                                <input type="text" id="smtpUser" placeholder="your@email.com" class="text-input">
+                            </label>
+                        </div>
+                        <div class="setting-group">
+                            <label>
+                                SMTP Password:
+                                <input type="password" id="smtpPassword" placeholder="App password" class="text-input">
+                            </label>
+                        </div>
+                    </details>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Data Management</h3>
+                    <button id="clearData" class="btn btn-danger">Clear All Data</button>
+                    <p class="warning-text">This will permanently delete all captured URLs and cannot be undone.</p>
+                </div>
+
+                <button id="saveSettings" class="btn btn-primary btn-large">Save Settings</button>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>HomeWatch - Simple WiFi Monitoring for Your Home</p>
+        </footer>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
