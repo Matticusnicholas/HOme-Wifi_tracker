@@ -11,6 +11,7 @@ let currentPage = 1;
 let totalPages = 1;
 let isMonitoring = false;
 let refreshInterval = null;
+let selectedMode = 'network'; // 'network' = all devices, 'local' = this PC only
 
 // DOM Elements
 const elements = {
@@ -97,6 +98,15 @@ function setupTabs() {
 
 // Event Listeners
 function setupEventListeners() {
+    // Mode selection buttons
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            selectedMode = btn.dataset.mode;
+        });
+    });
+
     // Monitoring controls
     elements.startBtn.addEventListener('click', startMonitoring);
     elements.stopBtn.addEventListener('click', stopMonitoring);
@@ -205,14 +215,23 @@ async function startMonitoring() {
     elements.startBtn.disabled = true;
     elements.startBtn.textContent = 'Starting...';
 
-    const result = await apiCall('/api/start', 'POST', { interface: 'auto' });
+    // Disable mode buttons while starting
+    document.querySelectorAll('.mode-btn').forEach(b => b.style.pointerEvents = 'none');
+
+    const result = await apiCall('/api/start', 'POST', {
+        interface: 'auto',
+        mode: selectedMode
+    });
 
     if (result && result.success) {
-        showToast('Monitoring started', 'success');
+        const modeText = selectedMode === 'network' ? 'ALL devices on network' : 'this PC only';
+        showToast(`Monitoring ${modeText}`, 'success');
         isMonitoring = true;
         updateStatusUI();
+        updateModeStatus(result.message);
     } else {
         showToast(result?.message || 'Failed to start monitoring', 'error');
+        document.querySelectorAll('.mode-btn').forEach(b => b.style.pointerEvents = '');
     }
 
     elements.startBtn.disabled = false;
@@ -228,11 +247,22 @@ async function stopMonitoring() {
         showToast('Monitoring stopped', 'success');
         isMonitoring = false;
         updateStatusUI();
+        updateModeStatus('');
+        // Re-enable mode buttons
+        document.querySelectorAll('.mode-btn').forEach(b => b.style.pointerEvents = '');
     } else {
         showToast(result?.message || 'Failed to stop monitoring', 'error');
     }
 
     elements.stopBtn.disabled = false;
+}
+
+function updateModeStatus(message) {
+    const statusEl = document.getElementById('modeStatus');
+    if (statusEl) {
+        statusEl.textContent = message;
+        statusEl.className = message ? 'mode-status active' : 'mode-status';
+    }
 }
 
 // Stats

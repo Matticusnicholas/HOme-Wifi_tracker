@@ -14,6 +14,7 @@ import json
 
 # Import our modules
 from capture import NetworkCapture
+from network_capture import NetworkWideCapture
 from scheduler import ReportScheduler
 from database import Database
 
@@ -25,6 +26,7 @@ db = Database()
 
 # Initialize network capture (will be started/stopped via UI)
 capture = None
+capture_mode = None  # 'local' or 'network'
 scheduler = None
 
 
@@ -37,15 +39,17 @@ def index():
 @app.route('/api/status')
 def get_status():
     """Get current monitoring status."""
-    global capture
+    global capture, capture_mode
     status = {
         'monitoring': capture is not None and capture.is_running,
+        'mode': capture_mode,
         'total_urls': db.get_total_count(),
         'today_count': db.get_today_count()
     }
     if capture:
         cap_status = capture.get_status()
         status['packets_captured'] = cap_status.get('packets', 0)
+        status['devices_count'] = cap_status.get('devices', 0)
         if cap_status.get('error'):
             status['error'] = cap_status['error']
     return jsonify(status)
@@ -54,23 +58,36 @@ def get_status():
 @app.route('/api/start', methods=['POST'])
 def start_monitoring():
     """Start network monitoring."""
-    global capture
-    if capture is None:
-        capture = NetworkCapture(db)
+    global capture, capture_mode
 
-    if not capture.is_running:
-        interface = request.json.get('interface', 'auto') if request.json else 'auto'
-        success, message = capture.start(interface)
-        return jsonify({'success': success, 'message': message})
-    return jsonify({'success': False, 'message': 'Already monitoring'})
+    # Stop existing capture if running
+    if capture and capture.is_running:
+        capture.stop()
+
+    # Get mode from request
+    data = request.json or {}
+    mode = data.get('mode', 'network')  # Default to network-wide
+    interface = data.get('interface', 'auto')
+
+    # Create appropriate capture instance
+    if mode == 'network':
+        capture = NetworkWideCapture(db)
+        capture_mode = 'network'
+    else:
+        capture = NetworkCapture(db)
+        capture_mode = 'local'
+
+    success, message = capture.start(interface)
+    return jsonify({'success': success, 'message': message, 'mode': capture_mode})
 
 
 @app.route('/api/stop', methods=['POST'])
 def stop_monitoring():
     """Stop network monitoring."""
-    global capture
+    global capture, capture_mode
     if capture and capture.is_running:
         capture.stop()
+        capture_mode = None
         return jsonify({'success': True, 'message': 'Monitoring stopped'})
     return jsonify({'success': False, 'message': 'Not currently monitoring'})
 
@@ -186,11 +203,13 @@ if __name__ == '__main__':
     print("""
     ╔═══════════════════════════════════════════════════════════╗
     ║                                                           ║
-    ║   🏠 HomeWatch - Simple WiFi Monitoring                   ║
+    ║   HomeWatch - Simple WiFi Monitoring                      ║
     ║                                                           ║
     ║   Open your browser to: http://localhost:5000             ║
     ║                                                           ║
-    ║   Note: Run with sudo for network capture capabilities    ║
+    ║   Modes:                                                  ║
+    ║   - All Devices: Monitors phones, tablets, everything!    ║
+    ║   - This PC Only: Just monitors this computer             ║
     ║                                                           ║
     ╚═══════════════════════════════════════════════════════════╝
     """)
