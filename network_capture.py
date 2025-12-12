@@ -208,18 +208,24 @@ class NetworkWideCapture:
             # Method 3: Try ipconfig (Windows)
             try:
                 output = subprocess.check_output("ipconfig", shell=True).decode('utf-8', errors='ignore')
-                # Try multiple patterns for different Windows languages/versions
-                patterns = [
-                    r'Default Gateway[.\s]*:\s*(\d+\.\d+\.\d+\.\d+)',
-                    r'Gateway[.\s]*:\s*(\d+\.\d+\.\d+\.\d+)',
-                    r'Puerta de enlace[.\s]*:\s*(\d+\.\d+\.\d+\.\d+)',  # Spanish
-                    r'Standardgateway[.\s]*:\s*(\d+\.\d+\.\d+\.\d+)',  # German
-                ]
-                for pattern in patterns:
-                    match = re.search(pattern, output, re.IGNORECASE)
-                    if match:
-                        print(f"[DEBUG] Gateway from ipconfig: {match.group(1)}")
-                        return match.group(1)
+                # Find all IPv4 addresses that look like gateways (not 0.0.0.0, not 127.x.x.x)
+                # The gateway might be on a continuation line after "Default Gateway"
+                gateway_section = re.search(r'Default Gateway.*?(?=\n\n|\nEthernet|\nWireless|\Z)', output, re.DOTALL | re.IGNORECASE)
+                if gateway_section:
+                    # Look for IPv4 address in the gateway section
+                    ipv4_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', gateway_section.group(0))
+                    if ipv4_match:
+                        gateway = ipv4_match.group(1)
+                        if not gateway.startswith('0.') and not gateway.startswith('127.'):
+                            print(f"[DEBUG] Gateway from ipconfig: {gateway}")
+                            return gateway
+
+                # Fallback: just find any 192.168.x.1 or 10.x.x.1 pattern (common gateway IPs)
+                common_gateways = re.findall(r'(192\.168\.\d+\.1|10\.\d+\.\d+\.1|172\.(?:1[6-9]|2\d|3[01])\.\d+\.1)', output)
+                if common_gateways:
+                    print(f"[DEBUG] Gateway from common pattern: {common_gateways[0]}")
+                    return common_gateways[0]
+
             except Exception as e:
                 print(f"[DEBUG] ipconfig method failed: {e}")
         else:
